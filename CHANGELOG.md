@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- Hardened tests: malformed/forged rejection paths, receipt determinism,
+  community scoping, attestation sponsor/voucher unlinkability.
+- No API changes.
+
 ## 0.1.0 — initial scaffold
 
 - Sponsor-signed vouchers with expiry, single-use receipt id for host

@@ -116,20 +116,89 @@ mod tests {
         (sk, vk)
     }
 
+    fn other_sponsor() -> VerifyingKey {
+        SigningKey::from_bytes(&[9u8; 32]).verifying_key()
+    }
+
+    fn issue(sk: &SigningKey, id: &str, valid_until: u64, community: &str) -> Voucher {
+        use ed25519_dalek::Signer;
+        let msg = issuance_bytes(id, valid_until, community);
+        Voucher {
+            id: id.into(),
+            valid_until,
+            signature: sk.sign(&msg).to_bytes().to_vec(),
+        }
+    }
+
     #[test]
     fn verify_roundtrip_and_expiry() {
         let (sk, vk) = sponsor();
-        let msg = issuance_bytes("v-1", 2000, "alpha");
-        use ed25519_dalek::Signer;
-        let sig = sk.sign(&msg).to_bytes().to_vec();
-        let v = Voucher {
-            id: "v-1".into(),
-            valid_until: 2000,
-            signature: sig,
-        };
+        let v = issue(&sk, "v-1", 2000, "alpha");
         assert!(verify(&v, &vk, "alpha", 1000).is_ok());
         assert_eq!(verify(&v, &vk, "alpha", 2000), Err(Error::Rejected));
         assert_eq!(verify(&v, &vk, "beta", 1000), Err(Error::Rejected));
+    }
+
+    #[test]
+    fn rejects_malformed_and_forged() {
+        let (sk, vk) = sponsor();
+        let good = issue(&sk, "v-1", 2000, "alpha");
+        // Empty and oversized ids.
+        let mut bad = good.clone();
+        bad.id = String::new();
+        assert_eq!(verify(&bad, &vk, "alpha", 1000), Err(Error::Rejected));
+        bad = good.clone();
+        bad.id = "x".repeat(129);
+        assert_eq!(verify(&bad, &vk, "alpha", 1000), Err(Error::Rejected));
+        // Truncated, padded and garbage signatures.
+        for sig in [vec![0u8; 63], vec![0u8; 65], vec![0xabu8; 64], vec![]] {
+            bad = good.clone();
+            bad.signature = sig;
+            assert_eq!(verify(&bad, &vk, "alpha", 1000), Err(Error::Rejected));
+        }
+        // Valid signature under another sponsor key.
+        assert_eq!(
+            verify(&good, &other_sponsor(), "alpha", 1000),
+            Err(Error::Rejected)
+        );
+        // Bit-flipped voucher id under the original signature.
+        bad = good.clone();
+        bad.id = "v-2".into();
+        assert_eq!(verify(&bad, &vk, "alpha", 1000), Err(Error::Rejected));
+    }
+
+    #[test]
+    fn receipt_is_deterministic_and_distinct() {
+        assert_eq!(receipt_id("v-1"), receipt_id("v-1"));
+        assert_ne!(receipt_id("v-1"), receipt_id("v-2"));
+        assert_eq!(receipt_id("v-1").len(), 64);
+    }
+
+    #[test]
+    fn issuance_is_community_scoped() {
+        assert_ne!(
+            issuance_bytes("v-1", 2000, "alpha"),
+            issuance_bytes("v-1", 2000, "beta")
+        );
+    }
+
+    #[test]
+    fn attestation_hides_sponsor_and_voucher() {
+        let (sk, vk) = sponsor();
+        let v = issue(&sk, "v-sensitive-id", 2000, "alpha");
+        let receipt = receipt_id(&v.id);
+        let binding = member_binding(&receipt, b"m1");
+        let bytes = attestation_bytes(&binding, v.valid_until);
+        let text = String::from_utf8(bytes).expect("attestation is JSON");
+        assert!(text.contains(&binding), "binding must be present");
+        assert!(
+            !text.contains("v-sensitive-id"),
+            "raw voucher id must not leak"
+        );
+        assert!(
+            !text.contains(&hex(vk.as_bytes())),
+            "sponsor key must not leak"
+        );
     }
 
     #[test]
