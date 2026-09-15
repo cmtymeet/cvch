@@ -84,6 +84,47 @@ pub fn member_binding(receipt: &str, member_id: &[u8]) -> String {
     hex(&h.finalize())
 }
 
+/// Host-owned single-use store. The host (e.g. cvld's receipt domain)
+/// implements atomic first-claim-wins durably; the library only computes
+/// keys. Returns `true` when this caller won the claim, `false` when spent.
+/// Must survive restarts — a process-local store would re-arm vouchers.
+pub trait SpendStore {
+    /// Atomically claim `receipt`. Returns `true` when this caller won.
+    fn try_claim(&mut self, receipt: &str) -> bool;
+}
+
+/// Successful redemption: member-bound proof input for cvld issuance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Redemption {
+    /// `member_binding(receipt, member)` — what the host attests.
+    pub binding: String,
+    /// Voucher expiry, carried into the attestation.
+    pub valid_until: u64,
+}
+
+/// One audited redemption path: verify, atomically claim, then bind.
+/// Failed verification never touches the store, so it cannot burn a
+/// voucher. The first claim wins globally; later attempts — same or
+/// different member — are rejected as spent.
+pub fn redeem<S: SpendStore>(
+    store: &mut S,
+    voucher: &Voucher,
+    sponsor_key: &VerifyingKey,
+    community_id: &str,
+    member_id: &[u8],
+    now_secs: u64,
+) -> Result<Redemption, Error> {
+    verify(voucher, sponsor_key, community_id, now_secs)?;
+    let receipt = receipt_id(&voucher.id);
+    if !store.try_claim(&receipt) {
+        return Err(Error::Rejected);
+    }
+    Ok(Redemption {
+        binding: member_binding(&receipt, member_id),
+        valid_until: voucher.valid_until,
+    })
+}
+
 /// Attestation bytes the host signs with Ed25519 for cvld issuance.
 /// Contains binding and expiry only: no sponsor identity, no voucher secret.
 #[must_use]
@@ -205,5 +246,51 @@ mod tests {
     fn binding_is_member_specific() {
         let r = receipt_id("v-1");
         assert_ne!(member_binding(&r, b"m1"), member_binding(&r, b"m2"));
+    }
+
+    /// Test-only store. Production hosts must implement `SpendStore`
+    /// durably (e.g. cvld's receipt domain); a process-local set would
+    /// re-arm vouchers on restart.
+    #[derive(Default)]
+    struct TestStore {
+        spent: std::collections::HashSet<String>,
+    }
+
+    impl SpendStore for TestStore {
+        fn try_claim(&mut self, receipt: &str) -> bool {
+            self.spent.insert(receipt.to_owned())
+        }
+    }
+
+    #[test]
+    fn redeem_binds_member_and_wins_once() {
+        let (sk, vk) = sponsor();
+        let v = issue(&sk, "v-1", 2000, "alpha");
+        let mut store = TestStore::default();
+        let r = redeem(&mut store, &v, &vk, "alpha", b"m1", 1000).expect("first wins");
+        assert_eq!(r.binding, member_binding(&receipt_id("v-1"), b"m1"));
+        assert_eq!(r.valid_until, 2000);
+        // Same member replay and another member's attempt both lose.
+        assert_eq!(
+            redeem(&mut store, &v, &vk, "alpha", b"m1", 1001),
+            Err(Error::Rejected)
+        );
+        assert_eq!(
+            redeem(&mut store, &v, &vk, "alpha", b"m2", 1001),
+            Err(Error::Rejected)
+        );
+    }
+
+    #[test]
+    fn redeem_failure_burns_nothing() {
+        let (sk, vk) = sponsor();
+        let v = issue(&sk, "v-1", 2000, "alpha");
+        let mut store = TestStore::default();
+        // Wrong community fails before any claim; the voucher stays live.
+        assert_eq!(
+            redeem(&mut store, &v, &vk, "beta", b"m1", 1000),
+            Err(Error::Rejected)
+        );
+        assert!(redeem(&mut store, &v, &vk, "alpha", b"m1", 1000).is_ok());
     }
 }

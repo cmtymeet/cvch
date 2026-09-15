@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- New `SpendStore` trait + `redeem()` audited path + `Redemption` type.
+  Host implements atomic durable claims (e.g. cvld receipt domain);
+  no store ships in the library. Failed verification burns nothing.
+- 8 fixture tests, no live issuance.
+
 ## 0.1.1
 
 - Hardened tests: malformed/forged rejection paths, receipt determinism,
