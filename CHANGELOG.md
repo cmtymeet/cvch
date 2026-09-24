@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- Package metadata points at the current GitHub repository.
+- Released from CI through crates.io trusted publishing.
+
 ## 0.2.0
 
 - New `SpendStore` trait + `redeem()` audited path + `Redemption` type.
