@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Repository transferred to github.com/corbet-foss/cvch (old cmtymeet URLs redirect); package metadata points there.
+
 ## 0.2.1
 
 - Package metadata points at the current GitHub repository.

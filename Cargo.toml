@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.88"
 description = "One-use member-bound voucher redemption with sponsor unlinkability for cvld/cfrm admission"
 license = "LGPL-3.0-only WITH LGPL-3.0-linking-exception"
-repository = "https://github.com/cmtymeet/cvch"
+repository = "https://github.com/corbet-foss/cvch"
 readme = "README.md"
 include = ["Cargo.toml", "src/**", "README.md", "CHANGELOG.md", "LICENSE", "LICENSE.md", "LICENSES/LGPL-3.0-only.txt", "LICENSES/LGPL-3.0-linking-exception.txt", "LICENSES/GPL-3.0-only.txt"]
 
